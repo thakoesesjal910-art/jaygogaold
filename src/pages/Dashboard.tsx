@@ -2,20 +2,26 @@ import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import Layout from '../components/Layout/Layout';
 import { useAuth } from '../context/AuthContext';
-import { Package, Users, ShoppingCart, TrendingUp, Clock, IndianRupee, Loader2 } from 'lucide-react';
+import { Users, ShoppingCart, TrendingUp, Clock, IndianRupee, Loader2 } from 'lucide-react';
 
 const Dashboard: React.FC = () => {
   const { orders, products, customers, dataLoading } = useAuth();
 
   const today = new Date().toISOString().split('T')[0];
   const todayOrders = orders.filter(order => order.date === today);
-  const deliveredOrders = todayOrders.filter(order => order.status === 'delivered');
 
   const totalCollectionToday = todayOrders.reduce((sum, order) => sum + (order.amount_paid || 0), 0);
   const totalAmountToday = todayOrders.reduce((sum, order) => sum + order.total_amount, 0);
   const totalPendingToday = totalAmountToday - totalCollectionToday;
 
   const stats = [
+    {
+      icon: TrendingUp,
+      label: 'Total Amount',
+      value: `₹${totalAmountToday.toFixed(2)}`,
+      color: 'bg-purple-100 text-purple-600',
+      bgColor: 'bg-purple-50'
+    },
     {
       icon: IndianRupee,
       label: 'Today\'s Collection',
@@ -38,20 +44,6 @@ const Dashboard: React.FC = () => {
       bgColor: 'bg-blue-50'
     },
     {
-      icon: TrendingUp,
-      label: 'Delivered Today',
-      value: deliveredOrders.length.toString(),
-      color: 'bg-dairy-100 text-dairy-600',
-      bgColor: 'bg-dairy-50'
-    },
-    {
-      icon: Package,
-      label: 'Total Products',
-      value: products.length.toString(),
-      color: 'bg-purple-100 text-purple-600',
-      bgColor: 'bg-purple-50'
-    },
-    {
       icon: Users,
       label: 'Total Customers',
       value: customers.length.toString(),
@@ -61,16 +53,26 @@ const Dashboard: React.FC = () => {
   ];
 
   const productSummary = useMemo(() => {
-    const summary: { [key: string]: number } = {};
+    const summary: { [productName: string]: { quantity: number; unit: string } } = {};
     todayOrders.forEach(order => {
-      order.items.forEach(item => {
-        const product = products.find(p => p.id === item.product_id);
-        const unitLabel = product?.unit === 'piece' ? 'pcs' : product?.unit || 'units';
-        const key = `${item.product_name} (${unitLabel})`;
-        summary[key] = (summary[key] || 0) + item.quantity;
-      });
+        order.items.forEach(item => {
+            const product = products.find(p => p.id === item.product_id);
+            const baseUnit = product?.unit || 'units';
+
+            let displayUnit = '';
+            if (baseUnit === 'piece') {
+                displayUnit = 'pcs';
+            } else if (baseUnit !== 'ml') {
+                displayUnit = baseUnit;
+            }
+
+            if (!summary[item.product_name]) {
+                summary[item.product_name] = { quantity: 0, unit: displayUnit };
+            }
+            summary[item.product_name].quantity += item.quantity;
+        });
     });
-    return Object.entries(summary).sort((a, b) => b[1] - a[1]);
+    return Object.entries(summary).sort((a, b) => b[1].quantity - a[1].quantity);
   }, [todayOrders, products]);
 
   if (dataLoading) {
@@ -135,10 +137,13 @@ const Dashboard: React.FC = () => {
           >
             <h3 className="text-lg font-semibold text-gray-800 mb-4">Today's Product Summary</h3>
             <div className="space-y-3 max-h-48 overflow-y-auto">
-              {productSummary.map(([productName, quantity]) => (
+              {productSummary.map(([productName, { quantity, unit }]) => (
                 <div key={productName} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
-                  <p className="font-medium text-gray-800 text-sm">{productName.split(' (')[0]}</p>
-                  <p className="font-semibold text-dairy-700">{quantity} <span className="text-sm font-normal text-gray-600">{productName.match(/\(([^)]+)\)/)?.[1]}</span></p>
+                  <p className="font-medium text-gray-800 text-sm">{productName}</p>
+                  <p className="font-semibold text-dairy-700">
+                    {quantity}
+                    {unit && <span className="text-sm font-normal text-gray-600 ml-1">{unit}</span>}
+                  </p>
                 </div>
               ))}
             </div>

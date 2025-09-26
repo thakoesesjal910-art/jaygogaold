@@ -26,7 +26,7 @@ interface StatementResult {
 }
 
 const Statement: React.FC = () => {
-  const { orders, customers, dataLoading } = useAuth();
+  const { orders, customers, products, dataLoading } = useAuth();
 
   const today = new Date().toISOString().split('T')[0];
   const [startDate, setStartDate] = useState(today);
@@ -96,6 +96,78 @@ const Statement: React.FC = () => {
       grandTotalPending: grandTotalAmount - grandTotalPaid,
       totalOrders: filteredOrders.length,
     });
+  };
+
+  const handleDownloadDailyFullReport = () => {
+    const todayOrders = orders.filter(order => order.date === today);
+
+    // Financial Summary Sheet
+    const totalCollectionToday = todayOrders.reduce((sum, order) => sum + (order.amount_paid || 0), 0);
+    const totalAmountToday = todayOrders.reduce((sum, order) => sum + order.total_amount, 0);
+    const totalPendingToday = totalAmountToday - totalCollectionToday;
+    const financialSummaryData = [
+      ["Metric", "Value"],
+      ["Total Amount", `₹${totalAmountToday.toFixed(2)}`],
+      ["Today's Collection", `₹${totalCollectionToday.toFixed(2)}`],
+      ["Today's Pending", `₹${totalPendingToday.toFixed(2)}`],
+      ["Total Orders Today", todayOrders.length],
+    ];
+    const financialWs = XLSX.utils.aoa_to_sheet(financialSummaryData);
+    financialWs['!cols'] = [{wch: 20}, {wch: 15}];
+
+    // Customer Summary Sheet
+    const customerSummary = todayOrders.reduce((acc, order) => {
+      if (!acc[order.customer_id]) {
+        acc[order.customer_id] = { name: order.customer_name, total: 0, paid: 0 };
+      }
+      acc[order.customer_id].total += order.total_amount;
+      acc[order.customer_id].paid += order.amount_paid || 0;
+      return acc;
+    }, {} as Record<string, { name: string, total: number, paid: number }>);
+    const customerSummaryData = [
+        ["Customer Name", "Total Amount", "Amount Paid", "Pending Amount"],
+        ...Object.values(customerSummary).map(c => [ c.name, c.total, c.paid, c.total - c.paid ])
+    ];
+    const customerWs = XLSX.utils.aoa_to_sheet(customerSummaryData);
+    customerWs['!cols'] = [{wch: 25}, {wch: 15}, {wch: 15}, {wch: 15}];
+
+    // Product Summary Sheet
+    const productSummary: { [productName: string]: { quantity: number; unit: string } } = {};
+    todayOrders.forEach(order => {
+        order.items.forEach(item => {
+            const product = products.find(p => p.id === item.product_id);
+            const baseUnit = product?.unit || 'units';
+            let displayUnit = baseUnit === 'piece' ? 'pcs' : (baseUnit === 'ml' ? '' : baseUnit);
+            if (!productSummary[item.product_name]) {
+                productSummary[item.product_name] = { quantity: 0, unit: displayUnit };
+            }
+            productSummary[item.product_name].quantity += item.quantity;
+        });
+    });
+    const productSummaryData = [
+        ["Product Name", "Total Quantity Sold"],
+        ...Object.entries(productSummary).map(([name, {quantity, unit}]) => [ name, `${quantity} ${unit}`.trim() ])
+    ];
+    const productWs = XLSX.utils.aoa_to_sheet(productSummaryData);
+    productWs['!cols'] = [{wch: 30}, {wch: 20}];
+
+    // All Orders Detailed Sheet
+    const allOrdersData = [
+        ["Date", "Customer Name", "Product Name", "Quantity", "Unit", "Price per Unit", "Total Price", "Status"],
+        ...todayOrders.flatMap(order => 
+            order.items.map(item => [ order.date, order.customer_name, item.product_name, item.quantity, item.unit, item.price, item.total, order.status ])
+        )
+    ];
+    const allOrdersWs = XLSX.utils.aoa_to_sheet(allOrdersData);
+    allOrdersWs['!cols'] = [{wch: 12}, {wch: 25}, {wch: 30}, {wch: 10}, {wch: 10}, {wch: 15}, {wch: 15}, {wch: 12}];
+
+    // Create workbook and download
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, financialWs, "Financial Summary");
+    XLSX.utils.book_append_sheet(wb, customerWs, "Customer Summary");
+    XLSX.utils.book_append_sheet(wb, productWs, "Product Summary");
+    XLSX.utils.book_append_sheet(wb, allOrdersWs, "All Orders Detailed");
+    XLSX.writeFile(wb, `Daily_Full_Report_${today}.xlsx`);
   };
 
   const handleDownloadPDF = () => {
@@ -249,6 +321,29 @@ const Statement: React.FC = () => {
               {dataLoading ? <Loader2 className="animate-spin" /> : 'Generate Statement'}
             </motion.button>
           </div>
+        </motion.div>
+        
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+          className="bg-white rounded-xl p-4 mb-6 shadow-sm border border-gray-100"
+        >
+          <h2 className="text-xl font-bold text-gray-800 mb-2">Daily Full Report</h2>
+          <p className="text-gray-600 mb-4">Download a complete Excel report of all data for today, {today}.</p>
+          <motion.button
+            onClick={handleDownloadDailyFullReport}
+            disabled={dataLoading}
+            className="w-full bg-green-600 text-white py-3 rounded-lg font-medium flex justify-center items-center space-x-2"
+            whileTap={{ scale: 0.98 }}
+          >
+            {dataLoading ? <Loader2 className="animate-spin" /> : (
+              <>
+                <FileSpreadsheet size={20} />
+                <span>Download Today's Report</span>
+              </>
+            )}
+          </motion.button>
         </motion.div>
 
         <AnimatePresence>
